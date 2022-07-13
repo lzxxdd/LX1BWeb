@@ -1,0 +1,187 @@
+在fs.c源文件和头文件中增加代码
+fs.c第59行添加代码
+#define RESPONSE_BUF_SIZE 512   //http响应缓存大小
+unsigned char data_response_ssi[RESPONSE_BUF_SIZE+14] =
+{
+	/* /response.ssi */
+	0x2F, 0x72, 0x65, 0x73, 0x70, 0x6F, 0x6E, 0x73, 
+	0x65, 0x2E, 0x73, 0x73, 0x69, 0x00, 
+};
+struct fsdata_file file_response_ssi[] = //注意这个变量，需要添加到fsdata.c中，最后一个文件的连接处
+{
+	{
+		NULL,
+		data_response_ssi,
+		data_response_ssi + 14,
+		sizeof(data_response_ssi) - 14
+	}
+};
+
+fs.h最后面增加代码:
+extern unsigned char data_response_ssi[];
+#define data_response_buf (data_response_ssi+14)
+
+改写后的httpd_cgi_ssi.c的内容如下：
+
+
+/* CGI handler for Upload control */
+
+const char *upload_cgi_handler( int iIndex, int iNumParams, char *pcParam[], char *pcValue[] );
+/* CGI handler for LED control */ 
+const char * leds_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[]);
+ 
+ 
+static const tCGI URL_TABLES[] = 
+{
+    {"/led1.cgi", leds_cgi_handler},
+    {"/led2.cgi",leds_cgi_handler},
+    {"/led_status.cgi",leds_cgi_handler},
+    {"/upload.cgi",upload_cgi_handler}
+};
+ 
+const rt_uint8_t CGI_URL_NUM  = (sizeof(URL_TABLES) / sizeof(tCGI));
+ 
+/**
+  * @brief  点亮LED
+  * @param  1：点亮LED1
+  * @param  2：点亮LED2
+  * @retval None
+  */
+static void led_set(uint8_t led)
+{
+    if (led == 1) {
+        led_status_set(1,1);
+    } else if (led == 2) {
+        led_status_set(2,1);
+    }
+}
+ 
+/**
+  * @brief  熄灭LED
+  * @param  1：熄灭LED1.
+  * @param  2：熄灭LED2
+  * @retval None
+  */
+static void led_clr(uint8_t led)
+{
+    if (led == 1) {
+        led_status_set(1,0);
+    } else if (led == 2) {
+        led_status_set(2,0);
+    }
+}
+ 
+//temp:存放温度字符串的首地址.如"22.2";
+static void temperature_get(rt_uint8_t *temp)
+{ 
+    static float value = 22.2;//测试用
+    value += 0.1;
+    if(value > 50)
+        value = 22.2;
+    sprintf((char *)temp,"%.1f",value);
+}
+ 
+//time:存放时间字符串,形如:"2020-05-05 12:33:00"
+static void systime_get(rt_uint8_t *time)
+{
+    static rt_uint8_t value = 0;//测试用
+    if(value ++ >= 60)
+        value = 0;
+    sprintf((char *)time,"2020-05-05 12:33:%02d",value);
+}
+/**
+  * @brief  LED 操作相关接口函数
+  */
+const char *leds_cgi_handler(int iIndex, int iNumParams, char *pcParam[], char *pcValue[])
+{
+    uint8_t i=0;
+ 
+  /* We have only one SSI handler iIndex = 0 */
+    /* All leds off */
+    /* Check cgi parameter : example GET /ledctrl.cgi?led=1&led=2 */
+    for (i=0; i<iNumParams; i++) 
+    {
+      /* check parameter "led" */
+        if (strcmp(pcParam[i] , "led1_0") == 0) 
+        { 
+            led_clr(1);  
+            rt_memset(data_response_buf,0,strlen((const char *)data_response_buf));
+            strcat((char *)(data_response_buf),"/image/light_off.jpg");
+        }      
+        else if(strcmp(pcParam[i] , "led1_1") == 0) 
+        {
+            led_set(1);
+            rt_memset(data_response_buf,0,strlen((const char *)data_response_buf));
+            strcat((char *)(data_response_buf),"/image/light_on.jpg");
+        }
+        
+        else if(strcmp(pcParam[i] , "led2_0") == 0) 
+        {
+            led_clr(2); 
+            rt_memset(data_response_buf,0,strlen((const char *)data_response_buf));
+            strcat((char *)(data_response_buf),"/image/light_off.jpg");
+        }
+        else if(strcmp(pcParam[i] , "led2_1") == 0) 
+        {
+            led_set(2);
+            rt_memset(data_response_buf,0,strlen((const char *)data_response_buf));
+            strcat((char *)(data_response_buf),"/image/light_on.jpg");
+        }
+        //判断LED的状态
+        else if(strcmp(pcParam[i], "led1_status") == 0)
+        {
+            rt_memset(data_response_buf,0,strlen((const char *)data_response_buf));
+            if(led_pin_read(1) == 0)//0代表亮
+                strcat((char *)(data_response_buf),"/image/light_on.jpg");
+            else
+                strcat((char *)(data_response_buf),"/image/light_off.jpg");
+        }
+        else if(strcmp(pcParam[i], "led2_status") == 0)
+        {
+            rt_memset(data_response_buf,0,strlen((const char *)data_response_buf));
+            if(led_pin_read(2) == 0)//0代表亮
+                strcat((char *)(data_response_buf),"/image/light_on.jpg");
+            else
+                strcat((char *)(data_response_buf),"/image/light_off.jpg");
+        }
+        
+    }
+    
+    return "/response.ssi";
+}
+
+
+
+const char *upload_cgi_handler( int iIndex, int iNumParams, char *pcParam[], char *pcValue[] )
+{
+    rt_uint8_t buf[20];
+    rt_memset(data_response_buf,0,strlen((const char *)data_response_buf)); //清除缓冲区的内容
+ 
+    temperature_get(data_response_buf);
+    strcat((char *)(data_response_buf),";");
+    systime_get(buf);
+    strcat((char *)(data_response_buf),(const char *)buf);
+ 
+    return "/response.ssi";
+}
+ 
+/**
+ * Initialize SSI handlers
+ */
+void httpd_ssi_init(void)
+{  
+   /* configure SSI handlers (ADC page SSI) */
+   //http_set_ssi_handler(ADC_Handler, (char const **)TAGS, 1);
+}
+ 
+/**
+ * Initialize CGI handlers
+ */
+void httpd_cgi_init(void)
+{ 
+    http_set_cgi_handlers(URL_TABLES, CGI_URL_NUM);//注册回调函数
+}
+
+————————————————
+版权声明：本文为CSDN博主「玩转物联网」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/u011522841/article/details/105945394
